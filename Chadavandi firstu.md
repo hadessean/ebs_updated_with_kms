@@ -1,0 +1,1 @@
+yem ledhu first terrform init nokkandi , atharuvatha terraform plan , aa tharuvatha terrform apply anthe oka ec2 create avuthadi dentlo unna public key tho , kani private ki naddagara unna dantho login avvagalaru , neku kavali ante nedi pettuko public key , key ane folder lo , ec2 create ipoyaka ssh ayyi lsblk kodthe ebs volume extra di untundi , enjoy pandagooo
