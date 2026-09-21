@@ -20,8 +20,8 @@ ebs_volumes = [
 ]
 
 # first type :nee daggara kms key unte ebs encrypt ni true chesi , kms key ni pettandi
-# CASE 2: true + null/"" -> Terraform creates a KMS key
-# CASE 3: false -> Terraform does not create/use a customer KMS key
+# rendodhi  true + null pedethe kms key create ipothadi
+# moododhi encryption lekunda create avuthai
 
 encrypt_ebs = true
 kms_key_arn = null
