@@ -3,8 +3,10 @@ name: Terraform CI/CD
 on:
   pull_request:
     branches: [main]
+
   push:
     branches: [main]
+
   workflow_dispatch:
 
 permissions:
@@ -21,14 +23,20 @@ env:
   AWS_REGION: us-east-1
 
 jobs:
-    
+
+  # ============================================================
+  # 1. FORMAT + VALIDATE
+  # ============================================================
   fmt-validate:
     name: Format & Validate
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
 
@@ -41,22 +49,42 @@ jobs:
       - name: Terraform validate
         run: terraform validate
 
+  # ============================================================
+  # 2. TERRAFORM PLAN
+  # ============================================================
   plan:
     name: Terraform Plan
     needs: fmt-validate
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
+
+      # Temporary diagnostic step.
+      # This DOES NOT print your AWS role ARN.
+      - name: Debug OIDC context
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Ref: $GITHUB_REF"
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Plan role configured: ${{ secrets.AWS_PLAN_ROLE_ARN != '' }}"
+          echo "State bucket configured: ${{ vars.TF_STATE_BUCKET != '' }}"
 
       - name: Configure AWS credentials - Plan role
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-terraform-plan
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
       - name: Terraform init
         run: |
@@ -67,7 +95,7 @@ jobs:
             -backend-config="use_lockfile=true"
 
       - name: Terraform plan
-        run: terraform plan -out=tfplan
+        run: terraform plan -input=false -out=tfplan
 
       - name: Upload saved plan
         uses: actions/upload-artifact@v4
@@ -76,16 +104,29 @@ jobs:
           path: tfplan
           retention-days: 5
 
+  # ============================================================
+  # 3. MANUAL APPROVAL + TERRAFORM APPLY
+  # ============================================================
   apply:
     name: Approval & Terraform Apply
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: plan
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    needs: plan
+
+    runs-on: ubuntu-latest
+
+    # GitHub will pause here and wait for the production
+    # environment reviewer.
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
 
@@ -94,6 +135,10 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-terraform-apply
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
       - name: Terraform init
         run: |
@@ -109,5 +154,4 @@ jobs:
           name: terraform-plan-${{ github.sha }}
 
       - name: Terraform apply
-        run: terraform apply -auto-approve tfplan
-
+        run: terraform apply -input=false -auto-approve tfplan
