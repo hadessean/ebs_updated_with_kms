@@ -1,4 +1,3 @@
-```yaml
 name: Terraform CI/CD
 
 on:
@@ -73,6 +72,10 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-terraform-plan
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
       - name: Terraform init
         run: |
@@ -83,7 +86,7 @@ jobs:
             -backend-config="use_lockfile=true"
 
       - name: Terraform plan
-        run: terraform plan -out=tfplan
+        run: terraform plan -input=false -out=tfplan
 
       - name: Upload Terraform plan
         uses: actions/upload-artifact@v4
@@ -97,26 +100,25 @@ jobs:
   # 3. MANUAL APPROVAL
   # =========================================================
   approval:
-    name: Manual Approval
+    name: Manual Production Approval
+
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
     needs: plan
 
     runs-on: ubuntu-latest
 
-    # Configure required reviewers for this environment
-    # in GitHub:
-    #
-    # Settings -> Environments -> production
-    # -> Required reviewers
-    #
     environment:
       name: production
 
     steps:
-      - name: Approval completed
+      - name: Production deployment approved
         run: |
-          echo "Production deployment approved."
-          echo "Terraform Apply can now start."
+          echo "====================================="
+          echo " Production deployment APPROVED"
+          echo "====================================="
+          echo "Commit: $GITHUB_SHA"
+          echo "Terraform Apply is now authorized."
 
 
   # =========================================================
@@ -124,9 +126,11 @@ jobs:
   # =========================================================
   apply:
     name: Terraform Apply
+
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     needs:
+      - plan
       - approval
 
     runs-on: ubuntu-latest
@@ -145,6 +149,10 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-terraform-apply
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
       - name: Terraform init
         run: |
@@ -160,5 +168,4 @@ jobs:
           name: terraform-plan-${{ github.sha }}
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
-```
+        run: terraform apply -input=false -auto-approve tfplan
