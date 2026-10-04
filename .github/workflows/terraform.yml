@@ -1,10 +1,13 @@
+```yaml
 name: Terraform CI/CD
 
 on:
   pull_request:
     branches: [main]
+
   push:
     branches: [main]
+
   workflow_dispatch:
 
 permissions:
@@ -21,13 +24,20 @@ env:
   AWS_REGION: us-east-1
 
 jobs:
+
+  # =========================================================
+  # 1. FORMAT AND VALIDATE
+  # =========================================================
   fmt-validate:
     name: Format & Validate
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
 
@@ -40,14 +50,21 @@ jobs:
       - name: Terraform validate
         run: terraform validate
 
+
+  # =========================================================
+  # 2. TERRAFORM PLAN
+  # =========================================================
   plan:
     name: Terraform Plan
     needs: fmt-validate
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
 
@@ -68,23 +85,58 @@ jobs:
       - name: Terraform plan
         run: terraform plan -out=tfplan
 
-      - name: Upload saved plan
+      - name: Upload Terraform plan
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan-${{ github.sha }}
           path: tfplan
           retention-days: 5
 
-  apply:
-    name: Approval & Terraform Apply
+
+  # =========================================================
+  # 3. MANUAL APPROVAL
+  # =========================================================
+  approval:
+    name: Manual Approval
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: plan
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+    runs-on: ubuntu-latest
+
+    # Configure required reviewers for this environment
+    # in GitHub:
+    #
+    # Settings -> Environments -> production
+    # -> Required reviewers
+    #
+    environment:
+      name: production
+
+    steps:
+      - name: Approval completed
+        run: |
+          echo "Production deployment approved."
+          echo "Terraform Apply can now start."
+
+
+  # =========================================================
+  # 4. TERRAFORM APPLY
+  # =========================================================
+  apply:
+    name: Terraform Apply
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    needs:
+      - approval
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
 
@@ -102,10 +154,11 @@ jobs:
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="use_lockfile=true"
 
-      - name: Download approved plan
+      - name: Download approved Terraform plan
         uses: actions/download-artifact@v5
         with:
           name: terraform-plan-${{ github.sha }}
 
-      - name: Terraform apply
+      - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
+```
