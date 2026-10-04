@@ -1,17 +1,12 @@
-name: Terraform CI/CD 
+name: Terraform CI/CD
 
 on:
   pull_request:
-    branches:
-      - main
-
+    branches: [main]
   push:
-    branches:
-      - main
-
+    branches: [main]
   workflow_dispatch:
 
-# Required for GitHub -> AWS OIDC authentication
 permissions:
   contents: read
   id-token: write
@@ -26,22 +21,13 @@ env:
   AWS_REGION: us-east-1
 
 jobs:
-
-  # ============================================================
-  # 1. FORMAT + VALIDATE
-  # ============================================================
-
   fmt-validate:
     name: Format & Validate
     runs-on: ubuntu-latest
-
     steps:
+      - uses: actions/checkout@v4
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
 
@@ -54,98 +40,22 @@ jobs:
       - name: Terraform validate
         run: terraform validate
 
-
-  # ============================================================
-  # 2. TERRAFORM PLAN
-  # ============================================================
-
   plan:
     name: Terraform Plan
     needs: fmt-validate
     runs-on: ubuntu-latest
-
     steps:
+      - uses: actions/checkout@v4
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
-
-      # --------------------------------------------------------
-      # TEMPORARY DEBUG
-      # Shows repository/ref/event but does NOT expose AWS secret
-      # --------------------------------------------------------
-
-      - name: Debug GitHub context
-        run: |
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Ref: $GITHUB_REF"
-          echo "Event: $GITHUB_EVENT_NAME"
-          echo "Plan role configured: ${{ secrets.AWS_PLAN_ROLE_ARN != '' }}"
-          echo "State bucket configured: ${{ vars.TF_STATE_BUCKET != '' }}"
-
-      # --------------------------------------------------------
-      # TEMPORARY OIDC CLAIM DEBUG
-      # Shows aud/sub sent by GitHub to AWS.
-      # Does NOT print the complete OIDC token.
-      # --------------------------------------------------------
-
-      - name: Inspect GitHub OIDC claims
-        shell: bash
-        run: |
-          TOKEN_RESPONSE=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
-
-          TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c \
-            "import sys,json; print(json.load(sys.stdin)['value'])")
-
-          PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
-
-          python3 - "$PAYLOAD" <<'PY'
-          import sys
-          import json
-          import base64
-
-          payload = sys.argv[1]
-
-          payload += "=" * (-len(payload) % 4)
-
-          claims = json.loads(
-              base64.urlsafe_b64decode(payload).decode()
-          )
-
-          print("aud =", claims.get("aud"))
-          print("sub =", claims.get("sub"))
-          print("repository =", claims.get("repository"))
-          print("repository_owner =", claims.get("repository_owner"))
-          print("ref =", claims.get("ref"))
-          print("environment =", claims.get("environment"))
-          print("event_name =", claims.get("event_name"))
-          PY
-
-      # --------------------------------------------------------
-      # AWS AUTHENTICATION - PLAN ROLE
-      # --------------------------------------------------------
 
       - name: Configure AWS credentials - Plan role
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-terraform-plan
-
-      # This will only run if OIDC authentication succeeds.
-
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
-      # --------------------------------------------------------
-      # TERRAFORM INIT
-      # --------------------------------------------------------
 
       - name: Terraform init
         run: |
@@ -155,75 +65,34 @@ jobs:
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="use_lockfile=true"
 
-      # --------------------------------------------------------
-      # TERRAFORM PLAN
-      # --------------------------------------------------------
-
       - name: Terraform plan
-        run: terraform plan -input=false -out=tfplan
+        run: terraform plan -out=tfplan
 
-      # Save the exact plan that will later be applied.
-
-      - name: Upload Terraform plan
+      - name: Upload saved plan
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan-${{ github.sha }}
           path: tfplan
           retention-days: 5
 
-
-  # ============================================================
-  # 3. MANUAL APPROVAL + TERRAFORM APPLY
-  # ============================================================
-
   apply:
     name: Approval & Terraform Apply
-
-    # Never apply from PRs.
-    # Only a push/merge to main can reach Apply.
-    if: |
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main'
-
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: plan
-
     runs-on: ubuntu-latest
-
-    # This connects the job to:
-    #
-    # Settings -> Environments -> production
-    #
-    # GitHub pauses here for your required reviewer.
-    environment:
-      name: production
-
+    environment: production
     steps:
+      - uses: actions/checkout@v4
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
-
-      # --------------------------------------------------------
-      # AWS AUTHENTICATION - APPLY ROLE
-      # --------------------------------------------------------
 
       - name: Configure AWS credentials - Apply role
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-terraform-apply
-
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
-      # --------------------------------------------------------
-      # TERRAFORM INIT
-      # --------------------------------------------------------
 
       - name: Terraform init
         run: |
@@ -233,18 +102,10 @@ jobs:
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="use_lockfile=true"
 
-      # --------------------------------------------------------
-      # DOWNLOAD EXACT PLAN GENERATED ABOVE
-      # --------------------------------------------------------
-
-      - name: Download approved Terraform plan
+      - name: Download approved plan
         uses: actions/download-artifact@v5
         with:
           name: terraform-plan-${{ github.sha }}
 
-      # --------------------------------------------------------
-      # TERRAFORM APPLY
-      # --------------------------------------------------------
-
       - name: Terraform apply
-        run: terraform apply -input=false -auto-approve tfplan
+        run: terraform apply -auto-approve tfplan
