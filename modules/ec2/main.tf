@@ -1,15 +1,25 @@
+resource "tls_private_key" "this" {
+  algorithm = "ED25519"
+}
+
 resource "aws_key_pair" "this" {
   key_name   = var.key_name
-  public_key = var.public_key
+  public_key = tls_private_key.this.public_key_openssh
+
   tags = {
     Name = var.key_name
   }
 }
 
+resource "local_sensitive_file" "private_key" {
+  content         = tls_private_key.this.private_key_openssh
+  filename        = "${path.root}/keys/${var.key_name}.pem"
+  file_permission = "0600"
+}
 resource "aws_instance" "this" {
   ami           = data.aws_ami.selected.id
   instance_type = var.instance_type
-  key_name      = aws_key_pair.this.key_name
+  key_name = aws_key_pair.this.key_name
 
   root_block_device {
     volume_size           = var.root_volume_size
