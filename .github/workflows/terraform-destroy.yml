@@ -20,6 +20,373 @@ env:
   TF_IN_AUTOMATION: true
   TF_INPUT: false
 
+  # AWS region where infrastructure exists
+  AWS_REGION: us-east-1
+
+  # Region where Terraform state S3 bucket exists
+  TF_STATE_REGION: ap-southeast-2
+
+
+jobs:
+
+  # =========================================================
+  # 1. TERRAFORM DESTROY PLAN
+  # =========================================================
+  destroy-plan:
+    name: Terraform Destroy Plan
+
+    if: github.event.inputs.confirm_destroy == 'DESTROY'
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # -------------------------------------------------------
+      # Checkout
+      # -------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # -------------------------------------------------------
+      # Terraform
+      # -------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.4"
+
+
+      # -------------------------------------------------------
+      # AWS Authentication
+      # Using the same role as Terraform Apply
+      # -------------------------------------------------------
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-terraform-destroy-plan
+
+
+      # -------------------------------------------------------
+      # Verify AWS account
+      # -------------------------------------------------------
+      - name: Verify AWS Identity
+        run: |
+          echo "======================================"
+          echo "AWS Identity"
+          echo "======================================"
+
+          aws sts get-caller-identity
+
+
+      # -------------------------------------------------------
+      # Debug backend configuration
+      # -------------------------------------------------------
+      - name: Debug Backend Configuration
+        run: |
+          echo "======================================"
+          echo "Terraform Backend Configuration"
+          echo "======================================"
+
+          echo "Infrastructure Region : $AWS_REGION"
+          echo "State Region          : $TF_STATE_REGION"
+          echo "State Bucket          : ${{ vars.TF_STATE_BUCKET }}"
+          echo "State Key             : ec2/terraform.tfstate"
+
+
+      # -------------------------------------------------------
+      # Make sure bucket variable exists
+      # -------------------------------------------------------
+      - name: Validate State Bucket Variable
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET }}" ]; then
+
+            echo "ERROR:"
+            echo "TF_STATE_BUCKET GitHub variable is empty."
+            echo ""
+            echo "Check:"
+            echo "GitHub -> Settings"
+            echo "Secrets and variables"
+            echo "Actions"
+            echo "Variables"
+
+            exit 1
+
+          fi
+
+          echo "TF_STATE_BUCKET variable exists."
+
+
+      # -------------------------------------------------------
+      # Check whether Terraform state actually exists
+      # -------------------------------------------------------
+      - name: Check Terraform State In S3
+        run: |
+          echo "======================================"
+          echo "Checking Terraform state"
+          echo "======================================"
+
+          echo "Bucket:"
+          echo "${{ vars.TF_STATE_BUCKET }}"
+
+          echo ""
+          echo "Key:"
+          echo "ec2/terraform.tfstate"
+
+          echo ""
+          echo "Checking S3 object..."
+
+          aws s3api head-object \
+            --bucket "${{ vars.TF_STATE_BUCKET }}" \
+            --key "ec2/terraform.tfstate" \
+            --region "${{ env.TF_STATE_REGION }}"
+
+          echo ""
+          echo "Terraform state file FOUND."
+
+
+      # -------------------------------------------------------
+      # Terraform Init
+      # EXACT SAME BACKEND AS APPLY
+      # -------------------------------------------------------
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=ec2/terraform.tfstate" \
+            -backend-config="region=${{ env.TF_STATE_REGION }}" \
+            -backend-config="use_lockfile=true"
+
+
+      # -------------------------------------------------------
+      # Show resources Terraform knows about
+      # -------------------------------------------------------
+      - name: Show Terraform State
+        run: |
+          echo "======================================"
+          echo "Resources currently managed"
+          echo "======================================"
+
+          terraform state list
+
+
+      # -------------------------------------------------------
+      # Create Destroy Plan
+      # -------------------------------------------------------
+      - name: Terraform Destroy Plan
+        run: |
+          echo "======================================"
+          echo "Creating Terraform Destroy Plan"
+          echo "======================================"
+
+          terraform plan \
+            -destroy \
+            -input=false \
+            -out=destroy.tfplan
+
+
+      # -------------------------------------------------------
+      # Display Destroy Plan
+      # -------------------------------------------------------
+      - name: Show Destroy Plan
+        run: |
+          terraform show destroy.tfplan
+
+
+      # -------------------------------------------------------
+      # Upload Destroy Plan
+      # -------------------------------------------------------
+      - name: Upload Destroy Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-destroy-plan-${{ github.run_id }}
+          path: destroy.tfplan
+          retention-days: 1
+
+
+
+  # =========================================================
+  # 2. MANUAL APPROVAL
+  # =========================================================
+  destroy-approval:
+    name: Manual Destroy Approval
+
+    needs:
+      - destroy-plan
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+
+      - name: Infrastructure Destruction Approved
+        run: |
+          echo "======================================"
+          echo "INFRASTRUCTURE DESTRUCTION APPROVED"
+          echo "======================================"
+          echo ""
+          echo "Terraform Destroy is authorized."
+
+
+
+  # =========================================================
+  # 3. TERRAFORM DESTROY
+  # =========================================================
+  destroy:
+    name: Terraform Destroy
+
+    needs:
+      - destroy-plan
+      - destroy-approval
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # -------------------------------------------------------
+      # Checkout
+      # -------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # -------------------------------------------------------
+      # Terraform
+      # -------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.4"
+
+
+      # -------------------------------------------------------
+      # AWS Authentication
+      # -------------------------------------------------------
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-terraform-destroy
+
+
+      # -------------------------------------------------------
+      # Verify AWS account
+      # -------------------------------------------------------
+      - name: Verify AWS Identity
+        run: |
+          echo "======================================"
+          echo "AWS Identity"
+          echo "======================================"
+
+          aws sts get-caller-identity
+
+
+      # -------------------------------------------------------
+      # Check state still exists
+      # -------------------------------------------------------
+      - name: Check Terraform State In S3
+        run: |
+          echo "======================================"
+          echo "Checking Terraform state before destroy"
+          echo "======================================"
+
+          aws s3api head-object \
+            --bucket "${{ vars.TF_STATE_BUCKET }}" \
+            --key "ec2/terraform.tfstate" \
+            --region "${{ env.TF_STATE_REGION }}"
+
+
+      # -------------------------------------------------------
+      # Terraform Init
+      # -------------------------------------------------------
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=ec2/terraform.tfstate" \
+            -backend-config="region=${{ env.TF_STATE_REGION }}" \
+            -backend-config="use_lockfile=true"
+
+
+      # -------------------------------------------------------
+      # Download approved Destroy Plan
+      # -------------------------------------------------------
+      - name: Download Destroy Plan
+        uses: actions/download-artifact@v5
+        with:
+          name: terraform-destroy-plan-${{ github.run_id }}
+
+
+      # -------------------------------------------------------
+      # Display the exact plan that will be executed
+      # -------------------------------------------------------
+      - name: Show Approved Destroy Plan
+        run: |
+          echo "======================================"
+          echo "APPROVED DESTROY PLAN"
+          echo "======================================"
+
+          terraform show destroy.tfplan
+
+
+      # -------------------------------------------------------
+      # DESTROY
+      # -------------------------------------------------------
+      - name: Terraform Destroy
+        run: |
+          echo "======================================"
+          echo "DESTROYING INFRASTRUCTURE"
+          echo "======================================"
+
+          terraform apply \
+            -input=false \
+            -auto-approve \
+            destroy.tfplan
+
+
+      # -------------------------------------------------------
+      # Verify state after destruction
+      # -------------------------------------------------------
+      - name: Verify Terraform State
+        run: |
+          echo "======================================"
+          echo "Remaining Terraform Resources"
+          echo "======================================"
+
+          terraform state list || true
+
+          echo ""
+          echo "======================================"
+          echo "Terraform Destroy Completed"
+          echo "======================================"name: Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: "Type DESTROY to confirm infrastructure deletion"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-destroy
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_INPUT: false
+
   # Infrastructure region
   AWS_REGION: us-east-1
 
