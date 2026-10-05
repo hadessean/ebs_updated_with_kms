@@ -10,6 +10,5 @@ module "ec2" {
   encrypt_ebs = var.encrypt_ebs
   kms_key_arn = var.kms_key_arn
 
-  key_name   = var.key_name
-  public_key = file("${path.root}/keys/id_ed25519.pub")
+  key_name = var.key_name
 }

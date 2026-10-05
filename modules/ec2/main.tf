@@ -20,7 +20,7 @@ resource "local_sensitive_file" "private_key" {
 resource "aws_instance" "this" {
   ami           = data.aws_ami.selected.id
   instance_type = var.instance_type
-  key_name = aws_key_pair.this.key_name
+  key_name      = aws_key_pair.this.key_name
 
   root_block_device {
     volume_size           = var.root_volume_size

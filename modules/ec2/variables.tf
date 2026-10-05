@@ -40,16 +40,9 @@ variable "kms_key_arn" {
   default     = null
 }
 
-variable "public_key" {
-  description = "SSH public key"
-  type        = string
-}
 
 variable "key_name" {
   description = "AWS EC2 key pair name"
   type        = string
   default     = "devops-key"
-}
-variable "public_key_path" {
-  type = string
 }
