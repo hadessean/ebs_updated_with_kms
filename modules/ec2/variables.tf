@@ -50,3 +50,6 @@ variable "key_name" {
   type        = string
   default     = "devops-key"
 }
+variable "public_key_path" {
+  type = string
+}

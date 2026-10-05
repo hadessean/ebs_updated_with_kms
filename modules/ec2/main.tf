@@ -16,6 +16,7 @@ resource "local_sensitive_file" "private_key" {
   filename        = "${path.root}/keys/${var.key_name}.pem"
   file_permission = "0600"
 }
+
 resource "aws_instance" "this" {
   ami           = data.aws_ami.selected.id
   instance_type = var.instance_type
