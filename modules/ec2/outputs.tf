@@ -15,5 +15,5 @@ output "ebs_volume_ids" {
 }
 
 output "kms_key_arn" {
-  value = local.ebs_kms_key_arn
+  value = var.kms_key_arn
 }
