@@ -26,6 +26,10 @@ resource "aws_instance" "this" {
     volume_size           = var.root_volume_size
     volume_type           = "gp3"
     delete_on_termination = true
+
+    # Encrypt root volume with the shared KMS key
+    encrypted  = var.encrypt_ebs
+    kms_key_id = var.encrypt_ebs ? var.kms_key_arn : null
   }
 
   tags = {
@@ -40,8 +44,9 @@ resource "aws_ebs_volume" "data" {
   size              = each.value.size
   type              = each.value.type
 
+  # Encrypt additional volumes with the SAME shared KMS key
   encrypted  = var.encrypt_ebs
-  kms_key_id = local.ebs_kms_key_arn
+  kms_key_id = var.encrypt_ebs ? var.kms_key_arn : null
 
   tags = {
     Name = "${var.instance_name}-${replace(each.key, "/dev/", "")}"
