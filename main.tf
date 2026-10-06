@@ -47,7 +47,7 @@ module "ec2" {
 
   ebs_volumes = var.ebs_volumes
   encrypt_ebs = var.encrypt_ebs
-  kms_key_arn = var.kms_key_arn
+  kms_key_arn = local.shared_kms_key_arn
 
   key_name = var.key_name
 }
