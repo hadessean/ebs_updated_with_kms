@@ -1,6 +1,6 @@
-name: Terraform CI/CD               
+name: Terraform CI/CD
 
-on:   
+on:
   pull_request:
     branches: [main]
 
@@ -10,7 +10,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # Required because the Apply job commits the generated practice PEM
+  # back into this repository.
+  contents: write
+
+  # Required for GitHub OIDC authentication with AWS.
   id-token: write
 
 concurrency:
@@ -20,8 +24,14 @@ concurrency:
 env:
   TF_IN_AUTOMATION: true
   TF_INPUT: false
+
+  # Infrastructure region
   AWS_REGION: us-east-1
+
+  # Terraform S3 state bucket region
   TF_STATE_REGION: ap-southeast-2
+
+
 jobs:
 
   # =========================================================
@@ -97,7 +107,7 @@ jobs:
 
 
   # =========================================================
-  # 3. MANUAL APPROVAL
+  # 3. MANUAL PRODUCTION APPROVAL
   # =========================================================
   approval:
     name: Manual Production Approval
@@ -136,14 +146,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -----------------------------------------------------
+      # Checkout repository
+      # -----------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
+      # -----------------------------------------------------
+      # Install Terraform
+      # -----------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.4"
 
+      # -----------------------------------------------------
+      # AWS OIDC authentication
+      # -----------------------------------------------------
       - name: Configure AWS credentials - Apply role
         uses: aws-actions/configure-aws-credentials@v5
         with:
@@ -151,9 +172,15 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: github-terraform-apply
 
+      # -----------------------------------------------------
+      # Verify which AWS role is being used
+      # -----------------------------------------------------
       - name: Verify AWS identity
         run: aws sts get-caller-identity
 
+      # -----------------------------------------------------
+      # Initialize Terraform using S3 backend
+      # -----------------------------------------------------
       - name: Terraform init
         run: |
           terraform init \
@@ -162,10 +189,61 @@ jobs:
             -backend-config="region=${{ env.TF_STATE_REGION }}" \
             -backend-config="use_lockfile=true"
 
+      # -----------------------------------------------------
+      # Download exact plan produced by Plan job
+      # -----------------------------------------------------
       - name: Download approved Terraform plan
         uses: actions/download-artifact@v5
         with:
           name: terraform-plan-${{ github.sha }}
 
+      # -----------------------------------------------------
+      # Apply approved Terraform plan
+      #
+      # tls_private_key creates:
+      #   public key
+      #   private key
+      #
+      # local_sensitive_file creates:
+      #   ./keys/devops-key.pem
+      # -----------------------------------------------------
       - name: Terraform Apply
         run: terraform apply -input=false -auto-approve tfplan
+
+      # -----------------------------------------------------
+      # Verify that Terraform generated the PEM file
+      # Do NOT print the contents of the key.
+      # -----------------------------------------------------
+      - name: Verify generated private key
+        run: |
+          echo "Checking generated key directory..."
+
+          if [ ! -f "keys/devops-key.pem" ]; then
+            echo "ERROR: keys/devops-key.pem was not generated."
+            exit 1
+          fi
+
+          echo "PEM file generated successfully."
+          ls -l keys/devops-key.pem
+
+      # -----------------------------------------------------
+      # Commit PEM into GitHub repository
+      #
+      # PRACTICE ONLY:
+      # Never use this approach for production private keys.
+      # -----------------------------------------------------
+      - name: Commit generated practice PEM key
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # -f allows adding the file even if *.pem or keys/
+          # exists in .gitignore.
+          git add -f keys/devops-key.pem
+
+          if git diff --cached --quiet; then
+            echo "No PEM changes to commit."
+          else
+            git commit -m "Add Terraform generated practice PEM key [skip ci]"
+            git push origin HEAD:main
+          fi
