@@ -11,12 +11,21 @@ resource "aws_key_pair" "this" {
   }
 }
 
-resource "local_sensitive_file" "private_key" {
-  content         = tls_private_key.this.private_key_openssh
-  filename        = "${path.root}/keys/${var.key_name}.pem"
-  file_permission = "0600"
+resource "aws_secretsmanager_secret" "ssh_private_key" {
+  name                    = "${var.instance_name}/ssh-private-key"
+  description             = "SSH private key for ${var.instance_name}"
+  recovery_window_in_days = 7
+
+  tags = {
+    Name = "${var.instance_name}-ssh-private-key"
+  }
 }
 
+resource "aws_secretsmanager_secret_version" "ssh_private_key" {
+  secret_id = aws_secretsmanager_secret.ssh_private_key.id
+
+  secret_string = tls_private_key.this.private_key_openssh
+}
 resource "aws_instance" "this" {
   ami           = data.aws_ami.selected.id
   instance_type = var.instance_type

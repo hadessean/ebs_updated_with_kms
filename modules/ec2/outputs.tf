@@ -17,3 +17,8 @@ output "ebs_volume_ids" {
 output "kms_key_arn" {
   value = var.kms_key_arn
 }
+
+output "ssh_secret_arn" {
+  description = "ARN of the EC2 SSH private key secret"
+  value       = aws_secretsmanager_secret.ssh_private_key.arn
+}

@@ -17,3 +17,7 @@ output "ebs_volume_ids" {
 output "kms_key_arn" {
   value = module.ec2.kms_key_arn
 }
+
+output "ssh_secret_arn" {
+  value = module.ec2.ssh_secret_arn
+}
