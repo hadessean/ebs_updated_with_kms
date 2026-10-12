@@ -15,7 +15,6 @@ resource "random_id" "secret_suffix" {
   byte_length = 4
 }
 
-# Create Secrets Manager secret with unique name
 resource "aws_secretsmanager_secret" "ssh_private_key" {
   name = "${var.instance_name}/ssh-private-key-${random_id.secret_suffix.hex}"
 
