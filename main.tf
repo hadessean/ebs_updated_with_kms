@@ -13,12 +13,14 @@ resource "aws_kms_key" "ebs" {
 }
 
 
-resource "aws_kms_alias" "ebs" {
-  count = var.encrypt_ebs && (
-    var.kms_key_arn == null || var.kms_key_arn == ""
-  ) ? 1 : 0
+resource "random_id" "kms_suffix" {
+  byte_length = 4
+}
 
-  name          = "alias/${var.instance_name}-ebs-kms"
+resource "aws_kms_alias" "ebs" {
+  count = var.encrypt_ebs && var.kms_key_arn == null ? 1 : 0
+
+  name          = "alias/${var.instance_name}-ebs-kms-${random_id.kms_suffix.hex}"
   target_key_id = aws_kms_key.ebs[0].key_id
 }
 # ============================================================
