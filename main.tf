@@ -18,7 +18,7 @@ resource "aws_kms_alias" "ebs" {
     var.kms_key_arn == null || var.kms_key_arn == ""
   ) ? 1 : 0
 
-  name          = "alias/shared-ebs-kms"
+  name          = "alias/${var.instance_name}-ebs-kms"
   target_key_id = aws_kms_key.ebs[0].key_id
 }
 # ============================================================
