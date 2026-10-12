@@ -1,44 +1,51 @@
-name: Terraform CI/CD       
-                                                     
+
+name: Terraform Multi-Environment
+
 on:
-  pull_request:
-    branches: [main]
-
-  push:  
-    branches: [main]
-
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Select environment
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
 
-permissions:            
+      action:
+        description: Select action
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
 
+      confirm_destroy:
+        description: Type DESTROY when destroying
+        required: false
+        type: string
+
+permissions:
   contents: read
-
-  # Required for GitHub OIDC authentication with AWS.
   id-token: write
 
 concurrency:
-  group: terraform-${{ github.ref }}
+  group: terraform-${{ inputs.environment }}
   cancel-in-progress: false
 
 env:
   TF_IN_AUTOMATION: true
   TF_INPUT: false
-
-  # Infrastructure region
   AWS_REGION: us-east-1
-
-  # Terraform S3 state bucket region
   TF_STATE_REGION: ap-southeast-2
 
-
 jobs:
-
-  # =========================================================
-  # 1. FORMAT AND VALIDATE
-  # =========================================================
-  fmt-validate:
-    name: Format & Validate
+  terraform:
+    name: ${{ inputs.action }} - ${{ inputs.environment }}
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
 
     steps:
       - name: Checkout
@@ -49,164 +56,72 @@ jobs:
         with:
           terraform_version: "1.13.4"
 
-      - name: Terraform fmt
-        run: terraform fmt -check -recursive
-
-      - name: Terraform init without backend
-        run: terraform init -backend=false
-
-      - name: Terraform validate
-        run: terraform validate
-
-
-  # =========================================================
-  # 2. TERRAFORM PLAN
-  # =========================================================
-  plan:
-    name: Terraform Plan
-    needs: fmt-validate
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.13.4"
-
-      - name: Configure AWS credentials - Plan role
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-terraform-plan
-
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
-      - name: Terraform init
+      - name: Check destroy confirmation
+        if: inputs.action == 'destroy'
+        env:
+          CONFIRM: ${{ inputs.confirm_destroy }}
         run: |
-          terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=ec2/terraform.tfstate" \
-            -backend-config="region=${{ env.TF_STATE_REGION }}" \
-            -backend-config="use_lockfile=true"
+          if [ "$CONFIRM" != "DESTROY" ]; then
+            echo "Destroy confirmation required"
+            exit 1
+          fi
 
-      - name: Terraform plan
-        run: terraform plan -input=false -out=tfplan
-
-      - name: Upload Terraform plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-plan-${{ github.sha }}
-          path: tfplan
-          retention-days: 5
-
-
-  # =========================================================
-  # 3. MANUAL PRODUCTION APPROVAL
-  # =========================================================
-  approval:
-    name: Manual Production Approval
-
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    needs: plan
-
-    runs-on: ubuntu-latest
-
-    environment:
-      name: production
-
-    steps:
-      - name: Production deployment approved
-        run: |
-          echo "====================================="
-          echo " Production deployment APPROVED"
-          echo "====================================="
-          echo "Commit: $GITHUB_SHA"
-          echo "Terraform Apply is now authorized."
-
-
-  # =========================================================
-  # 4. TERRAFORM APPLY
-  # =========================================================
-  apply:
-    name: Terraform Apply
-
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    needs:
-      - plan
-      - approval
-
-    runs-on: ubuntu-latest
-
-    steps:
-      # -----------------------------------------------------
-      # Checkout repository
-      # -----------------------------------------------------
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # -----------------------------------------------------
-      # Install Terraform
-      # -----------------------------------------------------
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.13.4"
-
-      # -----------------------------------------------------
-      # AWS OIDC authentication
-      # -----------------------------------------------------
-      - name: Configure AWS credentials - Apply role
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-terraform-apply
 
-      # -----------------------------------------------------
-      # Verify which AWS role is being used
-      # -----------------------------------------------------
-      - name: Verify AWS identity
+      - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
-      # -----------------------------------------------------
-      # Initialize Terraform using S3 backend
-      # -----------------------------------------------------
-      - name: Terraform init
+      - name: Terraform Format
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          DEPLOY_ENV: ${{ inputs.environment }}
         run: |
-          terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=ec2/terraform.tfstate" \
-            -backend-config="region=${{ env.TF_STATE_REGION }}" \
+          terraform init -input=false \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="key=ec2/$DEPLOY_ENV/terraform.tfstate" \
+            -backend-config="region=$TF_STATE_REGION" \
             -backend-config="use_lockfile=true"
 
-      # -----------------------------------------------------
-      # Download exact plan produced by Plan job
-      # -----------------------------------------------------
-      - name: Download approved Terraform plan
-        uses: actions/download-artifact@v5
-        with:
-          name: terraform-plan-${{ github.sha }}
+      - name: Terraform Validate
+        run: terraform validate
 
-      # -----------------------------------------------------
-      # Apply approved Terraform plan
-      #
-      # tls_private_key creates:
-      #   public key
-      #   private key
-      #
-      # local_sensitive_file creates:
-      #   ./keys/devops-key.pem
-      # -----------------------------------------------------
+      - name: Check destroy state exists
+        if: inputs.action == 'destroy'
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+        run: |
+          aws s3api head-object \
+            --bucket "$STATE_BUCKET" \
+            --key "ec2/$DEPLOY_ENV/terraform.tfstate" \
+            --region "$TF_STATE_REGION"
+
+      - name: Terraform Plan
+        env:
+          DEPLOY_ENV: ${{ inputs.environment }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          if [ "$ACTION" = "destroy" ]; then
+            terraform plan -destroy -input=false \
+              -var-file="environments/$DEPLOY_ENV.tfvars" \
+              -out=tfplan
+          else
+            terraform plan -input=false \
+              -var-file="environments/$DEPLOY_ENV.tfvars" \
+              -out=tfplan
+          fi
+
       - name: Terraform Apply
-        run: terraform apply -input=false -auto-approve tfplan
+        if: inputs.action == 'apply' || inputs.action == 'destroy'
+        run: terraform apply -input=false tfplan
 
-      
+      - name: Cleanup
+        if: always()
+        run: rm -f tfplan
