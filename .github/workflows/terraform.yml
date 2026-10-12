@@ -65,7 +65,7 @@ jobs:
             echo "Destroy confirmation required"
             exit 1
           fi
-          =====================
+    
       - name: Debug GitHub OIDC Claims
         uses: actions/github-script@v7
         with:
@@ -78,7 +78,7 @@ jobs:
             core.info(`Audience: ${payload.aud}`);
             core.info(`Subject: ${payload.sub}`);
             core.info(`Repository: ${payload.repository}`);
-            =================
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
