@@ -12,12 +12,12 @@ resource "aws_key_pair" "this" {
 }
 
 resource "aws_secretsmanager_secret" "ssh_private_key" {
-  name                    = "${var.instance_name}/ssh-private-key-v2"
+  name                    = "${var.instance_name}/ssh-private-key-v3"
   description             = "SSH private key for ${var.instance_name}"
   recovery_window_in_days = 7
 
   tags = {
-    Name = "${var.instance_name}-ssh-private-key-v2"
+    Name = "${var.instance_name}-ssh-private-key-v3"
   }
 }
 
