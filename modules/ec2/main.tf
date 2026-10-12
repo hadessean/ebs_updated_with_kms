@@ -1,13 +1,16 @@
 resource "tls_private_key" "this" {
   algorithm = "ED25519"
 }
+resource "random_id" "key_suffix" {
+  byte_length = 4
+}
 
 resource "aws_key_pair" "this" {
-  key_name   = var.key_name
+  key_name   = "${var.key_name}-${random_id.key_suffix.hex}"
   public_key = tls_private_key.this.public_key_openssh
 
   tags = {
-    Name = var.key_name
+    Name = "${var.key_name}-${random_id.key_suffix.hex}"
   }
 }
 
