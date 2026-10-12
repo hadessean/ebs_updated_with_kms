@@ -12,7 +12,7 @@ on:
 permissions:
   # Required because the Apply job commits the generated practice PEM
   # back into this repository.
-  contents: write
+  contents: read
 
   # Required for GitHub OIDC authentication with AWS.
   id-token: write
@@ -210,40 +210,4 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -input=false -auto-approve tfplan
 
-      # -----------------------------------------------------
-      # Verify that Terraform generated the PEM file
-      # Do NOT print the contents of the key.
-      # -----------------------------------------------------
-      - name: Verify generated private key
-        run: |
-          echo "Checking generated key directory..."
-
-          if [ ! -f "keys/devops-key.pem" ]; then
-            echo "ERROR: keys/devops-key.pem was not generated."
-            exit 1
-          fi
-
-          echo "PEM file generated successfully."
-          ls -l keys/devops-key.pem
-
-      # -----------------------------------------------------
-      # Commit PEM into GitHub repository
-      #
-      # PRACTICE ONLY:
-      # Never use this approach for production private keys.
-      # -----------------------------------------------------
-      - name: Commit generated practice PEM key
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # -f allows adding the file even if *.pem or keys/
-          # exists in .gitignore.
-          git add -f keys/devops-key.pem
-
-          if git diff --cached --quiet; then
-            echo "No PEM changes to commit."
-          else
-            git commit -m "Add Terraform generated practice PEM key [skip ci]"
-            git push origin HEAD:main
-          fi
+      
