@@ -10,8 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  # Required because the Apply job commits the generated practice PEM
-  # back into this repository.
+
   contents: read
 
   # Required for GitHub OIDC authentication with AWS.
