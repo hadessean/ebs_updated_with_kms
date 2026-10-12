@@ -22,3 +22,6 @@ output "ssh_secret_arn" {
   description = "ARN of the EC2 SSH private key secret"
   value       = aws_secretsmanager_secret.ssh_private_key.arn
 }
+output "ssh_secret_name" {
+  value = aws_secretsmanager_secret.ssh_private_key.name
+}
